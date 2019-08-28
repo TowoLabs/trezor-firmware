@@ -504,11 +504,7 @@ async def check_pin(keepalive_callback: KeepaliveCallback) -> bool:
         trezor.pin.keepalive_callback = None
 
     return ret
-                # We crossed the deadline, kill the running confirmation
-                # workflow. `self.workflow` is reset in the finally
-                # handler in `confirm_workflow`.
 
-            # If any other workflow is running, we bail out.
 
 class ConfirmInfo:
     def __init__(self) -> None:
@@ -867,7 +863,7 @@ class DialogManager:
     def _clear(self) -> None:
         self.state = None  # type: Optional[State]
         self.deadline = 0
-        self.done_signal = loop.signal()
+        self.done_signal = None  # type: Optional[loop.chan]
         self.user_confirmed = None  # type: Optional[bool]
         self.workflow = None  # type: Optional[Coroutine]
         self.keepalive = None  # type: Optional[Coroutine]
@@ -891,7 +887,7 @@ class DialogManager:
     def is_busy(self) -> bool:
         if utime.ticks_ms() >= self.deadline:
             self.reset()
-        return bool(workflow.workflows)
+        return bool(workflow.tasks or self.workflow)
 
     def compare(self, state: State) -> bool:
         if self.state != state:
@@ -909,24 +905,25 @@ class DialogManager:
         self.reset_timeout()
         self.user_confirmed = None
         if state.keepalive_status() is not None:
-            self.done_signal.reset()
+            self.done_signal = loop.chan()
             self.keepalive = self.keepalive_loop()
             loop.schedule(self.keepalive)
         else:
+            self.done_signal = None
             self.keepalive = None
         self.workflow = self.dialog_workflow()
         loop.schedule(self.workflow)
         return True
 
     async def keepalive_loop(self) -> None:
-        if not isinstance(self.state, Fido2State):
+        if not isinstance(self.state, Fido2State) or self.done_signal is None:
             return
         try:
             while utime.ticks_ms() < self.deadline:
                 cmd = cmd_keepalive(self.state.cid, self.state.keepalive_status())
                 await send_cmd(cmd, self.iface)
-                waiter = loop.spawn(
-                    loop.sleep(_KEEPALIVE_INTERVAL_MS * 1000), self.done_signal
+                waiter = loop.race(
+                    loop.sleep(_KEEPALIVE_INTERVAL_MS * 1000), self.done_signal.take()
                 )
                 await waiter
                 if self.user_confirmed is not None:
@@ -954,7 +951,8 @@ class DialogManager:
         if self.state is None:
             return
         self.user_confirmed = await self.state.confirm_dialog()
-        self.done_signal.send(None)
+        if self.done_signal:
+            await self.done_signal.put(None)
         if self.user_confirmed:
             await self.state.on_confirm()
         else:
