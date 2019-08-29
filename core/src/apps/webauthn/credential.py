@@ -220,7 +220,7 @@ class U2fCredential(Credential):
             return False
 
         # Sort U2F credentials lexicographically amongst each other.
-        return self.id > other.id
+        return self.id < other.id
 
     def private_key(self) -> bytes:
         if self.node is None:
@@ -305,7 +305,7 @@ class U2fCredential(Credential):
         mac.update(keypath)
 
         # verify the hmac
-        if mac.digest() != keyhandle[32:]:
+        if utils.consteq(mac.digest(), keyhandle[32:]):
             if __debug__:
                 log.warning(__name__, "invalid key handle")
             return None

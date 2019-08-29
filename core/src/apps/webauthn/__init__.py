@@ -132,6 +132,7 @@ _ERR_UNSUPPORTED_ALGORITHM = const(0x26)  # requested COSE algorithm not support
 _ERR_OPERATION_DENIED = const(0x27)  # user declined or timed out
 _ERR_KEY_STORE_FULL = const(0x28)  # internal key storage is full
 _ERR_UNSUPPORTED_OPTION = const(0x2B)  # unsupported option
+_ERR_INVALID_OPTION = const(0x2C)  # not a valid option for current operation
 _ERR_KEEPALIVE_CANCEL = const(0x2D)  # pending keep alive was cancelled
 _ERR_NO_CREDENTIALS = const(0x2E)  # no valid credentials provided
 _ERR_NOT_ALLOWED = const(0x30)  # continuation command not allowed
@@ -513,8 +514,8 @@ class ConfirmInfo:
     def get_header(self) -> Optional[str]:
         return None
 
-    def app_name(self) -> Optional[str]:
-        return None
+    def app_name(self) -> str:
+        raise NotImplementedError
 
     def account_name(self) -> Optional[str]:
         return None
@@ -552,16 +553,13 @@ class ConfirmContent(ui.Component):
 
             # Dummy requests usually have some text as both app_name and account_name,
             # in that case show the text only once.
-            if (
-                app_name is not None
-                and account_name is not None
-                and app_name != account_name
-            ):
-                text_center_trim_left(ui.WIDTH // 2, 140, app_name)
-                text_center_trim_right(ui.WIDTH // 2, 172, account_name)
-            elif account_name is not None:
-                text_center_trim_right(ui.WIDTH // 2, 156, account_name)
-            elif app_name is not None:
+            if account_name is not None:
+                if app_name != account_name:
+                    text_center_trim_left(ui.WIDTH // 2, 140, app_name)
+                    text_center_trim_right(ui.WIDTH // 2, 172, account_name)
+                else:
+                    text_center_trim_right(ui.WIDTH // 2, 156, account_name)
+            else:
                 text_center_trim_left(ui.WIDTH // 2, 156, app_name)
 
             self.repaint = False
@@ -576,7 +574,7 @@ class State:
         return None
 
     def timeout_ms(self) -> int:
-        return _U2F_CONFIRM_TIMEOUT_MS
+        raise NotImplementedError
 
     async def confirm_dialog(self) -> bool:
         pass
@@ -600,6 +598,9 @@ class U2fState(State, ConfirmInfo):
         self._cred = cred
         self._req_data = req_data
         self.load_icon(self._cred.rp_id_hash)
+
+    def timeout_ms(self) -> int:
+        return _U2F_CONFIRM_TIMEOUT_MS
 
     def app_name(self) -> str:
         return self._cred.app_name()
@@ -733,7 +734,7 @@ class Fido2ConfirmMakeCredential(Fido2State, ConfirmInfo):
 
 class Fido2ConfirmExcluded(Fido2ConfirmMakeCredential):
     def __init__(self, cid: int, iface: io.HID, cred: Fido2Credential) -> None:
-        super().__init__(cid, iface, b"", cred, False, False)
+        super().__init__(cid, iface, b"", cred, resident=False, user_verification=False)
 
     async def on_confirm(self) -> None:
         cmd = cbor_error(self.cid, _ERR_CREDENTIAL_EXCLUDED)
@@ -804,29 +805,24 @@ class Fido2ConfirmGetAssertion(Fido2State, ConfirmInfo, Pageable):
         await send_cmd(cmd, self.iface)
 
 
-class Fido2ConfirmNoPin(Fido2State):
+class Fido2ConfirmNoPin(State):
     def __init__(self, cid: int, iface: io.HID) -> None:
         super().__init__(cid, iface)
+
+    def timeout_ms(self) -> int:
+        return _FIDO2_CONFIRM_TIMEOUT_MS
 
     async def confirm_dialog(self) -> bool:
         text = Text("FIDO2 Verify User", ui.ICON_WRONG, ui.RED)
         text.normal("Unable to verify user.", "Please enable PIN", "protection.")
         return await Confirm(text, confirm=None) is CONFIRMED
 
-    async def on_confirm(self) -> None:
-        cmd = cbor_error(self.cid, _ERR_UNSUPPORTED_OPTION)
-        await send_cmd(cmd, self.iface)
-
-    async def on_decline(self) -> None:
-        cmd = cbor_error(self.cid, _ERR_UNSUPPORTED_OPTION)
-        await send_cmd(cmd, self.iface)
-
 
 class Fido2ConfirmNoCredentials(Fido2ConfirmGetAssertion):
     def __init__(self, cid: int, iface: io.HID, rp_id: str) -> None:
         cred = Credential()
         cred.rp_id = rp_id
-        super().__init__(cid, iface, b"", [cred], {}, False)
+        super().__init__(cid, iface, b"", [cred], {}, user_verification=False)
 
     async def on_confirm(self) -> None:
         cmd = cbor_error(self.cid, _ERR_NO_CREDENTIALS)
@@ -1273,22 +1269,21 @@ def cbor_make_credential(req: Cmd, dialog_mgr: DialogManager) -> Optional[Cmd]:
 
         # Check that the relying party supports ECDSA P-256 with SHA-256. We don't support any other algorithms.
         pub_key_cred_params = param[_MAKECRED_CMD_PUB_KEY_CRED_PARAMS]
-        if _COSE_ALG_ES256 not in (alg.get("alg", None) for alg in pub_key_cred_params):
+        if ("public-key", _COSE_ALG_ES256) not in (
+            (pkcp.get("type", None), pkcp.get("alg", None))
+            for pkcp in pub_key_cred_params
+        ):
             return cbor_error(req.cid, _ERR_UNSUPPORTED_ALGORITHM)
-
-        # Get extensions.
-        cred.hmac_secret = param.get(_MAKECRED_CMD_EXTENSIONS, {}).get(
-            "hmac-secret", False
-        )
 
         # Get options.
         options = param.get(_MAKECRED_CMD_OPTIONS, {})
         resident_key = options.get("rk", False)
         user_verification = options.get("uv", False)
 
-        # Check that the pinAuth parameter is absent. Client PIN is not supported.
-        if _MAKECRED_CMD_PIN_AUTH in param:
-            return cbor_error(req.cid, _ERR_PIN_AUTH_INVALID)
+        # Get supported extensions.
+        cred.hmac_secret = param.get(_MAKECRED_CMD_EXTENSIONS, {}).get(
+            "hmac-secret", False
+        )
 
         client_data_hash = param[_MAKECRED_CMD_CLIENT_DATA_HASH]
     except Exception:
@@ -1303,24 +1298,33 @@ def cbor_make_credential(req: Cmd, dialog_mgr: DialogManager) -> Optional[Cmd]:
     ):
         return cbor_error(req.cid, _ERR_INVALID_CBOR)
 
+    # Check options.
     if resident_key and not _ALLOW_RESIDENT_CREDENTIALS:
         return cbor_error(req.cid, _ERR_UNSUPPORTED_OPTION)
 
     if user_verification and not config.has_pin():
         # User verification requested, but PIN is not enabled.
         state_set = dialog_mgr.set_state(Fido2ConfirmNoPin(req.cid, dialog_mgr.iface))
-    else:
-        # Ask user to confirm registration.
-        state_set = dialog_mgr.set_state(
-            Fido2ConfirmMakeCredential(
-                req.cid,
-                dialog_mgr.iface,
-                client_data_hash,
-                cred,
-                resident_key,
-                user_verification,
-            )
+        if state_set:
+            return cbor_error(req.cid, _ERR_UNSUPPORTED_OPTION)
+        else:
+            return cmd_error(req.cid, _ERR_CHANNEL_BUSY)
+
+    # Check that the pinAuth parameter is absent. Client PIN is not supported.
+    if _MAKECRED_CMD_PIN_AUTH in param:
+        return cbor_error(req.cid, _ERR_PIN_AUTH_INVALID)
+
+    # Ask user to confirm registration.
+    state_set = dialog_mgr.set_state(
+        Fido2ConfirmMakeCredential(
+            req.cid,
+            dialog_mgr.iface,
+            client_data_hash,
+            cred,
+            resident_key,
+            user_verification,
         )
+    )
 
     if not state_set:
         return cmd_error(req.cid, _ERR_CHANNEL_BUSY)
@@ -1394,10 +1398,10 @@ def cbor_get_assertion(req: Cmd, dialog_mgr: DialogManager) -> Optional[Cmd]:
         rp_id = param[_GETASSERT_CMD_RP_ID]
         rp_id_hash = hashlib.sha256(rp_id).digest()
 
+        cred_list = []
         allow_list = param.get(_GETASSERT_CMD_ALLOW_LIST, [])
         if allow_list:
             # Get all credentials from the allow list that belong to this authenticator.
-            cred_list = []
             for credential_descriptor in allow_list:
                 if credential_descriptor["type"] != "public-key":
                     continue
@@ -1408,9 +1412,8 @@ def cbor_get_assertion(req: Cmd, dialog_mgr: DialogManager) -> Optional[Cmd]:
                     cred_list.append(cred)
         else:
             # Allow list is empty. Get resident credentials.
-            if not _ALLOW_RESIDENT_CREDENTIALS:
-                return cbor_error(req.cid, _ERR_UNSUPPORTED_OPTION)
-            cred_list = get_resident_credentials(rp_id_hash)
+            if _ALLOW_RESIDENT_CREDENTIALS:
+                cred_list = get_resident_credentials(rp_id_hash)
 
         # Sort credentials by time of creation.
         cred_list.sort()
@@ -1424,7 +1427,7 @@ def cbor_get_assertion(req: Cmd, dialog_mgr: DialogManager) -> Optional[Cmd]:
         user_presence = options.get("up", True)
         user_verification = options.get("uv", False)
 
-        # Get extensions.
+        # Get supported extensions.
         hmac_secret = param.get(_GETASSERT_CMD_EXTENSIONS, {}).get("hmac-secret", None)
 
         client_data_hash = param[_GETASSERT_CMD_CLIENT_DATA_HASH]
@@ -1440,13 +1443,19 @@ def cbor_get_assertion(req: Cmd, dialog_mgr: DialogManager) -> Optional[Cmd]:
     ):
         return cbor_error(req.cid, _ERR_INVALID_CBOR)
 
-    # User verification cannot happen without user presence.
-    user_presence = user_presence or user_verification
+    # Check options.
+    if "rk" in options:
+        return cbor_error(req.cid, _ERR_INVALID_OPTION)
 
     if user_verification and not config.has_pin():
         # User verification requested, but PIN is not enabled.
         state_set = dialog_mgr.set_state(Fido2ConfirmNoPin(req.cid, dialog_mgr.iface))
-    elif not cred_list:
+        if state_set:
+            return cbor_error(req.cid, _ERR_UNSUPPORTED_OPTION)
+        else:
+            return cmd_error(req.cid, _ERR_CHANNEL_BUSY)
+
+    if not cred_list:
         # No credentials. This authenticator is not registered.
         if user_presence:
             state_set = dialog_mgr.set_state(
@@ -1454,11 +1463,16 @@ def cbor_get_assertion(req: Cmd, dialog_mgr: DialogManager) -> Optional[Cmd]:
             )
         else:
             return cbor_error(req.cid, _ERR_NO_CREDENTIALS)
-    elif not user_presence:
+    elif not user_presence and not user_verification:
         # Silent authentication.
         try:
             response_data = cbor_get_assertion_sign(
-                client_data_hash, rp_id_hash, cred_list[0], hmac_secret, False, False
+                client_data_hash,
+                rp_id_hash,
+                cred_list[0],
+                hmac_secret,
+                user_presence,
+                user_verification,
             )
             return Cmd(req.cid, _CMD_CBOR, bytes([_ERR_NONE]) + response_data)
         except Exception:
@@ -1500,7 +1514,7 @@ def cbor_get_assertion_hmac_secret(
         or len(salt_auth) != 16
         or len(salt_enc) not in (32, 64)
     ):
-        raise ValueError
+        return None
 
     # Compute the ECDH shared secret.
     ecdh_result = nist256p1.multiply(_KEY_AGREEMENT_PRIVKEY, b"\04" + x + y)
@@ -1509,7 +1523,7 @@ def cbor_get_assertion_hmac_secret(
     # Check the authentication tag and decrypt the salt.
     tag = hmac.Hmac(shared_secret, salt_enc, hashlib.sha256).digest()[:16]
     if not utils.consteq(tag, salt_auth):
-        raise ValueError
+        return None
     salt = aes(aes.CBC, shared_secret).decrypt(salt_enc)
 
     # Get cred_random - a constant symmetric key associated with the credential.
