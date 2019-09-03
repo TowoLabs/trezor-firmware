@@ -820,7 +820,7 @@ class Fido2ConfirmNoPin(State):
 
 class Fido2ConfirmNoCredentials(Fido2ConfirmGetAssertion):
     def __init__(self, cid: int, iface: io.HID, rp_id: str) -> None:
-        cred = Credential()
+        cred = Fido2Credential()
         cred.rp_id = rp_id
         super().__init__(cid, iface, b"", [cred], {}, user_verification=False)
 
