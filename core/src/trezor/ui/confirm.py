@@ -57,6 +57,7 @@ class Confirm(ui.Layout):
             self.cancel = None
 
     def dispatch(self, event: int, x: int, y: int) -> None:
+        super().dispatch(event, x, y)
         self.content.dispatch(event, x, y)
         if self.confirm is not None:
             self.confirm.dispatch(event, x, y)
@@ -128,23 +129,22 @@ class ConfirmPageable(Confirm):
         else:
             return tasks
 
-    def dispatch(self, event: int, x: int, y: int) -> None:
+    def on_render(self) -> None:
         PULSE_PERIOD = const(1200000)
 
-        super().dispatch(event, x, y)
+        super().on_render()
 
-        if event is ui.RENDER:
-            if not self.pageable.is_first():
-                t = ui.pulse(PULSE_PERIOD)
-                c = ui.blend(ui.GREY, ui.DARK_GREY, t)
-                icon = res.load(ui.ICON_SWIPE_RIGHT)
-                ui.display.icon(18, 68, icon, c, ui.BG)
+        if not self.pageable.is_first():
+            t = ui.pulse(PULSE_PERIOD)
+            c = ui.blend(ui.GREY, ui.DARK_GREY, t)
+            icon = res.load(ui.ICON_SWIPE_RIGHT)
+            ui.display.icon(18, 68, icon, c, ui.BG)
 
-            if not self.pageable.is_last():
-                t = ui.pulse(PULSE_PERIOD, PULSE_PERIOD // 2)
-                c = ui.blend(ui.GREY, ui.DARK_GREY, t)
-                icon = res.load(ui.ICON_SWIPE_LEFT)
-                ui.display.icon(205, 68, icon, c, ui.BG)
+        if not self.pageable.is_last():
+            t = ui.pulse(PULSE_PERIOD, PULSE_PERIOD // 2)
+            c = ui.blend(ui.GREY, ui.DARK_GREY, t)
+            icon = res.load(ui.ICON_SWIPE_LEFT)
+            ui.display.icon(205, 68, icon, c, ui.BG)
 
 
 class HoldToConfirm(ui.Layout):
