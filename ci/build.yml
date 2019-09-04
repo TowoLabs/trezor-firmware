@@ -96,7 +96,7 @@ build core unix regular darwin:
   script:
     - sed -i '' 's/pkg-config/pkg-config --static/' core/SConscript.unix
     - . $HOME/.nix-profile/etc/profile.d/nix.sh
-    - nix-shell --run "cd core && make build_unix"
+    - nix-shell --run "cd core && LDFLAGS=\"-static -static-libgcc\" make build_unix"
     - cp -v core/build/unix/micropython trezor-darwin-$VERSION-$CI_COMMIT_SHORT_SHA.bin
   allow_failure: true
   artifacts:
