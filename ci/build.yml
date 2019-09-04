@@ -94,7 +94,6 @@ build core unix regular darwin:
   tags:
     - darwin
   script:
-    - sed -i '' 's/pkg-config/pkg-config --static/' core/SConscript.unix
     - . $HOME/.nix-profile/etc/profile.d/nix.sh
     - nix-shell --run "cd core && make build_unix"
     - mkdir -p TrezorEmu-$CI_COMMIT_SHORT_SHA.app/Contents/{MacOS,libs}
