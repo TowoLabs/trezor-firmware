@@ -2,26 +2,26 @@ image: registry.gitlab.com/satoshilabs/trezor/trezor-firmware/environment
 
 # Core
 
-test core unix unit:
+core unix unit test:
   stage: test
   dependencies:
-    - build core unix frozen regular
+    - core unix frozen regular build
   script:
     - cd core
     - pipenv run make test
 
-test core unix device:
+core unix device test:
   stage: test
   dependencies:
-    - build core unix frozen regular
+    - core unix frozen regular build
   script:
     - cd core
     - pipenv run make test_emu
 
-test core unix device bitcoinonly:
+core unix btconly device test:
   stage: test
   dependencies:
-    - build core unix frozen bitcoinonly
+    - core unix frozen btconly build
   variables:
     MICROPYTHON: "../build/unix/micropython-bitcoinonly"
     TREZOR_PYTEST_SKIP_ALTCOINS: 1
@@ -29,10 +29,10 @@ test core unix device bitcoinonly:
     - cd core
     - pipenv run make test_emu
 
-test core unix monero:
+core unix monero test:
   stage: test
   dependencies:
-    - build core unix frozen regular
+    - core unix frozen regular build
   script:
     - cd core
     - pipenv run make test_emu_monero
@@ -40,10 +40,10 @@ test core unix monero:
 
 # Crypto
 
-test crypto:
+crypto test:
   stage: test
   dependencies:
-    - build crypto
+    - crypto build
   script:
     - cd crypto
     - ./tests/aestst
@@ -55,20 +55,20 @@ test crypto:
 
 # Legacy
 
-test legacy emu:
+legacy emu test:
   stage: test
   dependencies:
-    - build legacy emu regular
+    - legacy emu regular build
   variables:
     EMULATOR: "1"
   script:
     - cd legacy
     - pipenv run script/test
 
-test legacy emu bitcoinonly:
+legacy emu btconly test:
   stage: test
   dependencies:
-    - build legacy emu bitcoinonly
+    - legacy emu btconly build
   variables:
     EMULATOR: "1"
     EMULATOR_BINARY: "firmware/trezor-bitcoinonly.elf"
@@ -80,7 +80,7 @@ test legacy emu bitcoinonly:
 
 # Python
 
-test python:
+python test:
   stage: test
   script:
     - cd python
@@ -89,7 +89,7 @@ test python:
 
 # Storage
 
-test storage:
+storage test:
   stage: test
   dependencies: []
   script:
@@ -100,11 +100,11 @@ test storage:
 
 # Other
 
-test upgrade:
+upgrade test:
   stage: test
   dependencies:
-    - build core unix frozen debug
-    - build legacy emu regular
+    - core unix frozen debug build
+    - legacy emu regular build
   script:
     - tests/upgrade_tests/download_emulators.sh
     - pipenv run pytest tests/upgrade_tests

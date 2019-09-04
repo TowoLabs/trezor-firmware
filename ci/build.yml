@@ -7,7 +7,7 @@ variables:
 
 # Core
 
-build core firmware regular:
+core fw regular build:
   stage: build
   script:
     - cd core
@@ -26,7 +26,7 @@ build core firmware regular:
     - trezor-*.*.*-$CI_COMMIT_SHORT_SHA.bin
     expire_in: 1 week
 
-build core firmware bitcoinonly:
+core fw btconly build:
   stage: build
   variables:
     BITCOIN_ONLY: "1"
@@ -44,13 +44,13 @@ build core firmware bitcoinonly:
     - trezor-*.*.*-$CI_COMMIT_SHORT_SHA-bitcoinonly.bin
     expire_in: 1 week
 
-build core unix regular:
+core unix regular build:
   stage: build
   script:
     - cd core
     - pipenv run make build_unix
 
-build core unix frozen regular:
+core unix frozen regular build:
   stage: build
   script:
     - cd core
@@ -62,7 +62,7 @@ build core unix frozen regular:
     - core/src/trezor/res/resources.py
     expire_in: 1 week
 
-build core unix frozen bitcoinonly:
+core unix frozen btconly build:
   stage: build
   variables:
     BITCOIN_ONLY: "1"
@@ -77,7 +77,7 @@ build core unix frozen bitcoinonly:
     - core/src/trezor/res/resources.py
     expire_in: 1 week
 
-build core unix frozen debug:
+core unix frozen debug build:
   stage: build
   variables:
     PYOPT: "0"
@@ -92,7 +92,7 @@ build core unix frozen debug:
 
 # Crypto
 
-build crypto:
+crypto build:
   stage: build
   script:
     - cd crypto
@@ -110,7 +110,7 @@ build crypto:
 # Legacy
 
 # TODO: add clang https://github.com/trezor/trezor-firmware/issues/44
-build legacy firmware regular:
+legacy fw regular build:
   stage: build
   variables:
     MEMORY_PROTECT: "0"
@@ -128,7 +128,7 @@ build legacy firmware regular:
     - trezor-*.*.*-$CI_COMMIT_SHORT_SHA.bin
     expire_in: 1 week
 
-build legacy firmware debug:
+legacy fw debug build:
   stage: build
   variables:
     DEBUG_LINK: "1"
@@ -137,7 +137,7 @@ build legacy firmware debug:
     - cd legacy
     - pipenv run script/cibuild
 
-build legacy firmware bitcoinonly:
+legacy fw btconly build:
   stage: build
   variables:
     BITCOIN_ONLY: "1"
@@ -156,7 +156,7 @@ build legacy firmware bitcoinonly:
     - trezor-*.*.*-$CI_COMMIT_SHORT_SHA-bitcoinonly.bin
     expire_in: 1 week
 
-build legacy emu regular:
+legacy emu regular build:
   stage: build
   variables:
     DEBUG_LINK: "1"
@@ -170,7 +170,7 @@ build legacy emu regular:
     - legacy/firmware/trezor.elf
     expire_in: 1 week
 
-build legacy emu bitcoinonly:
+legacy emu btconly build:
   stage: build
   variables:
     BITCOIN_ONLY: "1"
